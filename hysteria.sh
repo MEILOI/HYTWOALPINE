@@ -31,7 +31,7 @@ check_dependencies() {
         elif command -v apt >/dev/null 2>&1; then
             yellow "检测到 apt 包管理器，尝试安装缺失依赖..."
             apt update && apt install -y $missing_deps
-        elif command -v yum >/dev/null 2>&1;
+        elif command -v yum >/dev/null 2>&1; then
             yellow "检测到 yum 包管理器，尝试安装缺失依赖..."
             yum install -y $missing_deps
         else
@@ -339,7 +339,7 @@ menu() {
     echo -e "# ${GREEN}原GitHub 项目${PLAIN}: https://github.com/Misaka-blog            #"
     echo -e "# ${GREEN}移植作者${PLAIN}: TheX                                          #"
     echo -e "# ${GREEN}移植项目${PLAIN}: https://github.com/MEILOI/HYTWOALPINE         #"
-    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0                                         #"
+    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.1                                       #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
@@ -352,7 +352,7 @@ menu() {
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     read -rp "请输入选项 [0-6]: " menuInput
     case $menuInput in
-        1) inst_*\insthysteria ;;
+        1) insthysteria ;;
         2) unsthysteria ;;
         3) hysteriaswitch ;;
         4) changeconf ;;
