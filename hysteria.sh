@@ -16,7 +16,7 @@ yellow() { echo -e "\033[33m\033[01m$1\033[0m"; }
 
 # 检查并安装依赖
 check_dependencies() {
-    local deps="curl wget bash iptables openssl qrencode"
+    local deps="curl wget bash openssl iptables qrencode"
     local missing_deps=""
     for dep in $deps; do
         if ! command -v $dep >/dev/null 2>&1; then
@@ -24,15 +24,19 @@ check_dependencies() {
         fi
     done
     if [[ -n $missing_deps ]]; then
-        yellow "以下依赖缺失，将尝试安装：$missing_deps"
+        yellow "以下依赖缺失：$missing_deps"
         if command -v apk >/dev/null 2>&1; then
+            yellow "检测到 apk 包管理器，尝试安装缺失依赖..."
             apk add --no-cache $missing_deps
         elif command -v apt >/dev/null 2>&1; then
+            yellow "检测到 apt 包管理器，尝试安装缺失依赖..."
             apt update && apt install -y $missing_deps
         elif command -v yum >/dev/null 2>&1; then
+            yellow "检测到 yum 包管理器，尝试安装缺失依赖..."
             yum install -y $missing_deps
         else
-            red "未检测到包管理器，请手动安装：$missing_deps"
+            red "未检测到包管理器，请手动安装以下依赖：$missing_deps"
+            red "例如，在 Alpine Linux 上运行：apk add --no-cache $missing_deps"
             exit 1
         fi
     fi
@@ -42,15 +46,27 @@ check_dependencies
 
 realip() {
     ip=$(curl -s4m8 ip.gs -k) || ip=$(curl -s6m8 ip.gs -k)
+    if [[ -z $ip ]]; then
+        red "无法获取服务器 IP，请检查网络连接"
+        exit 1
+    fi
 }
 
 inst_cert() {
+    if ! command -v openssl >/dev/null 2>&1; then
+        red "openssl 未安装，请先安装 openssl"
+        exit 1
+    fi
     green "将使用必应自签证书作为 Hysteria 2 的节点证书"
     cert_path="/etc/hysteria/cert.crt"
     key_path="/etc/hysteria/private.key"
     mkdir -p /etc/hysteria
     openssl ecparam -genkey -name prime256v1 -out /etc/hysteria/private.key
     openssl req -new -x509 -days 36500 -key /etc/hysteria/private.key -out /etc/hysteria/cert.crt -subj "/CN=www.bing.com"
+    if [[ ! -f $cert_path || ! -f $key_path ]]; then
+        red "证书生成失败，请检查 openssl 是否正常工作"
+        exit 1
+    fi
     chmod 644 /etc/hysteria/cert.crt /etc/hysteria/private.key
     hy_domain="www.bing.com"
     domain="www.bing.com"
@@ -59,8 +75,8 @@ inst_cert() {
 inst_port() {
     read -p "设置 Hysteria 2 端口 [1-65535]（回车则随机分配端口）：" port
     [[ -z $port ]] && port=$(shuf -i 2000-65535 -n 1)
-    until [[ -z $(ss -tunlp | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; do
-        if [[ -n $(ss -tunlp | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; then
+    until [[ -z $(ss -tunlp 2>/dev/null | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; do
+        if [[ -n $(ss -tunlp 2>/dev/null | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; then
             echo -e "${RED} $port ${PLAIN} 端口已经被其他程序占用，请更换端口重试！"
             read -p "设置 Hysteria 2 端口 [1-65535]（回车则随机分配端口）：" port
             [[ -z $port ]] && port=$(shuf -i 2000-65535 -n 1)
@@ -76,6 +92,7 @@ inst_port() {
         ip6tables-save >/etc/ip6tables.rules 2>/dev/null || true
     else
         yellow "未检测到 iptables，需手动配置防火墙放行 UDP 端口 $port"
+        yellow "请在 VPS 控制面板或主机防火墙中放行 UDP 端口 $port"
     fi
 }
 
@@ -96,13 +113,17 @@ insthysteria() {
 
     # 下载 Hysteria 2 二进制 (x86_64)
     HYSTERIA_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep tag_name | cut -d '"' -f 4)
+    if [[ -z $HYSTERIA_VERSION ]]; then
+        red "无法获取 Hysteria 最新版本，请检查网络连接"
+        exit 1
+    fi
     wget -O /usr/local/bin/hysteria https://github.com/apernet/hysteria/releases/download/${HYSTERIA_VERSION}/hysteria-linux-amd64
     chmod +x /usr/local/bin/hysteria
 
     if [[ -f "/usr/local/bin/hysteria" ]]; then
         green "Hysteria 2 安装成功！"
     else
-        red "Hysteria 2 安装失败！"
+        red "Hysteria 2 安装失败，请检查网络或磁盘空间"
         exit 1
     fi
 
@@ -178,10 +199,10 @@ EOF
     nohup /usr/local/bin/hysteria server --config /etc/hysteria/config.yaml > /var/log/hysteria.log 2>&1 &
     echo $! > /run/hysteria.pid
     sleep 2
-    if ps -p $(cat /run/hysteria.pid) >/dev/null; then
+    if ps | grep -q "[h]ysteria.*server"; then
         green "Hysteria 2 服务启动成功"
     else
-        red "Hysteria 2 服务启动失败，请检查 /var/log/hysteria.log 并反馈"
+        red "Hysteria 2 服务启动失败，请检查 /var/log/hysteria.log"
         exit 1
     fi
 
@@ -210,7 +231,7 @@ starthysteria() {
     nohup /usr/local/bin/hysteria server --config /etc/hysteria/config.yaml > /var/log/hysteria.log 2>&1 &
     echo $! > /run/hysteria.pid
     sleep 2
-    if ps -p $(cat /run/hysteria.pid) >/dev/null; then
+    if ps | grep -q "[h]ysteria.*server"; then
         green "Hysteria 2 服务已启动"
     else
         red "Hysteria 2 服务启动失败，请检查 /var/log/hysteria.log"
@@ -241,8 +262,8 @@ changeport() {
     oldport=$(cat /etc/hysteria/config.yaml 2>/dev/null | sed -n 1p | awk '{print $2}' | awk -F ":" '{print $2}')
     read -p "设置 Hysteria 2 端口[1-65535]（回车则随机分配端口）：" port
     [[ -z $port ]] && port=$(shuf -i 2000-65535 -n 1)
-    until [[ -z $(ss -tunlp | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; do
-        if [[ -n $(ss -tunlp | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; then
+    until [[ -z $(ss -tunlp 2>/dev/null | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; do
+        if [[ -n $(ss -tunlp 2>/dev/null | grep -w udp | awk '{print $5}' | sed 's/.*://g' | grep -w "$port") ]]; then
             echo -e "${RED} $port ${PLAIN} 端口已经被其他程序占用，请更换端口重试！"
             read -p "设置 Hysteria 2 端口 [1-65535]（回车则随机分配端口）：" port
             [[ -z $port ]] && port=$(shuf -i 2000-65535 -n 1)
@@ -257,6 +278,8 @@ changeport() {
         ip6tables -I INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
         iptables-save >/etc/iptables.rules 2>/dev/null || true
         ip6tables-save >/etc/ip6tables.rules 2>/dev/null || true
+    else
+        yellow "未检测到 iptables，需手动放行新端口 $port"
     fi
     stophysteria && starthysteria
     green "Hysteria 2 端口已成功修改为：$port"
@@ -297,6 +320,10 @@ showconf() {
 
 update_core() {
     HYSTERIA_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep tag_name | cut -d '"' -f 4)
+    if [[ -z $HYSTERIA_VERSION ]]; then
+        red "无法获取 Hysteria 最新版本，请检查网络连接"
+        exit 1
+    fi
     wget -O /usr/local/bin/hysteria https://github.com/apernet/hysteria/releases/download/${HYSTERIA_VERSION}/hysteria-linux-amd64
     chmod +x /usr/local/bin/hysteria
     stophysteria && starthysteria
