@@ -16,50 +16,89 @@ yellow() { echo -e "\033[33m\033[01m$1\033[0m"; }
 
 # 检查并安装依赖
 check_dependencies() {
-    local deps="curl wget bash openssl iptables ip6tables qrencode"
-    local missing_deps=""
-    for dep in $deps; do
+    local core_deps="curl wget bash openssl iptables ip6tables"
+    local optional_deps="qrencode"
+    local missing_core_deps=""
+    local missing_optional_deps=""
+    
+    # 检查核心依赖
+    for dep in $core_deps; do
         if ! command -v $dep >/dev/null 2>&1; then
-            missing_deps="$missing_deps $dep"
+            missing_core_deps="$missing_core_deps $dep"
         fi
     done
-    if [[ -n $missing_deps ]]; then
-        yellow "以下依赖缺失：$missing_deps"
+    # 检查可选依赖
+    for dep in $optional_deps; do
+        if ! command -v $dep >/dev/null 2>&1; then
+            missing_optional_deps="$missing_optional_deps $dep"
+        fi
+    done
+
+    if [[ -n $missing_core_deps || -n $missing_optional_deps ]]; then
+        yellow "以下依赖缺失：核心依赖 [$missing_core_deps] 可选依赖 [$missing_optional_deps]"
         if command -v apk >/dev/null 2>&1; then
-            yellow "检测到 apk 包管理器，配置 community 仓库并安装依赖..."
+            yellow "检测到 apk 包管理器，配置仓库并安装依赖..."
             # 动态获取 Alpine 版本
-            local alpine_version=$(cat /etc/alpine-release | cut -d'.' -f1,2)
+            local alpine_version=$(cat /etc/alpine-release 2>/dev/null | cut -d'.' -f1,2 || echo "3.21")
             local repo_file="/etc/apk/repositories"
+            local main_repo="https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/main"
             local community_repo="https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/community"
-            # 检查是否已启用 community 仓库
+            
+            # 确保 main 和 community 仓库存在
+            if ! grep -q "$main_repo" "$repo_file"; then
+                echo "$main_repo" >> "$repo_file"
+                yellow "已添加 main 仓库：$main_repo"
+            fi
             if ! grep -q "$community_repo" "$repo_file"; then
                 echo "$community_repo" >> "$repo_file"
                 yellow "已添加 community 仓库：$community_repo"
             fi
-            # 更新仓库并安装依赖
-            apk update
-            apk add --no-cache $deps || {
-                red "apk 安装依赖失败，可能是网络或镜像源问题"
-                red "请检查 /etc/apk/repositories 或手动运行："
-                red "  echo 'https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/community' >> /etc/apk/repositories"
-                red "  apk update && apk add --no-cache $deps"
+            
+            # 清理缓存并更新仓库
+            apk cache clean
+            apk update || {
+                red "apk update 失败，可能是网络或镜像源问题"
+                red "请尝试更换镜像源（如 mirrors.tuna.tsinghua.edu.cn）："
+                red "  sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories"
+                red "  apk update && apk add --no-cache $core_deps $optional_deps"
                 exit 1
             }
+            
+            # 安装核心依赖
+            if [[ -n $missing_core_deps ]]; then
+                apk add --no-cache $core_deps || {
+                    red "核心依赖 [$missing_core_deps] 安装失败"
+                    red "请手动运行：apk add --no-cache $core_deps"
+                    exit 1
+                }
+                green "核心依赖 [$core_deps] 安装成功"
+            fi
+            
+            # 安装可选依赖（qrencode）
+            if [[ -n $missing_optional_deps ]]; then
+                apk add --no-cache $optional_deps || {
+                    yellow "可选依赖 [$missing_optional_deps] 安装失败，二维码生成功能可能不可用"
+                    yellow "请手动运行：apk add --no-cache $optional_deps"
+                    yellow "或更换镜像源：sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories"
+                }
+            fi
         elif command -v apt >/dev/null 2>&1; then
             yellow "检测到 apt 包管理器，尝试安装缺失依赖..."
-            apt update && apt install -y $missing_deps || {
-                red "apt 安装依赖失败，请手动运行：apt update && apt install -y $missing_deps"
+            apt update && apt install -y $missing_core_deps $missing_optional_deps || {
+                red "apt 安装依赖失败，请手动运行：apt update && apt install -y $missing_core_deps $missing_optional_deps"
                 exit 1
             }
         elif command -v yum >/dev/null 2>&1; then
             yellow "检测到 yum 包管理器，尝试安装缺失依赖..."
-            yum install -y $missing_deps || {
-                red "yum 安装依赖失败，请手动运行：yum install -y $missing_deps"
+            yum install -y $missing_core_deps $missing_optional_deps || {
+                red "yum 安装依赖失败，请手动运行：yum install -y $missing_core_deps $missing_optional_deps"
                 exit 1
             }
         else
-            red "未检测到包管理器，请手动安装以下依赖：$missing_deps"
-            red "例如，在 Alpine Linux 上运行：apk add --no-cache $deps"
+            red "未检测到包管理器，请手动安装以下依赖："
+            red "核心依赖：$missing_core_deps"
+            red "可选依赖：$missing_optional_deps"
+            red "例如，在 Alpine Linux 上运行：apk add --no-cache $core_deps $optional_deps"
             exit 1
         fi
     fi
@@ -362,7 +401,7 @@ menu() {
     echo -e "# ${GREEN}原GitHub 项目${PLAIN}: https://github.com/Misaka-blog            #"
     echo -e "# ${GREEN}移植作者${PLAIN}: TheX                                          #"
     echo -e "# ${GREEN}移植项目${PLAIN}: https://github.com/MEILOI/HYTWOALPINE         #"
-    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.3                                       #"
+    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.4                                       #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
