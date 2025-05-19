@@ -26,14 +26,23 @@ check_dependencies() {
     if [[ -n $missing_deps ]]; then
         yellow "以下依赖缺失：$missing_deps"
         if command -v apk >/dev/null 2>&1; then
-            yellow "检测到 apk 包管理器，尝试安装缺失依赖..."
-            apk add --no-cache $missing_deps
+            yellow "检测到 apk 包管理器，自动安装缺失依赖..."
+            apk add --no-cache $missing_deps || {
+                red "apk 安装依赖失败，请手动运行：apk add --no-cache $missing_deps"
+                exit 1
+            }
         elif command -v apt >/dev/null 2>&1; then
             yellow "检测到 apt 包管理器，尝试安装缺失依赖..."
-            apt update && apt install -y $missing_deps
+            apt update && apt install -y $missing_deps || {
+                red "apt 安装依赖失败，请手动运行：apt update && apt install -y $missing_deps"
+                exit 1
+            }
         elif command -v yum >/dev/null 2>&1; then
             yellow "检测到 yum 包管理器，尝试安装缺失依赖..."
-            yum install -y $missing_deps
+            yum install -y $missing_deps || {
+                red "yum 安装依赖失败，请手动运行：yum install -y $missing_deps"
+                exit 1
+            }
         else
             red "未检测到包管理器，请手动安装以下依赖：$missing_deps"
             red "例如，在 Alpine Linux 上运行：apk add --no-cache $missing_deps"
@@ -339,7 +348,7 @@ menu() {
     echo -e "# ${GREEN}原GitHub 项目${PLAIN}: https://github.com/Misaka-blog            #"
     echo -e "# ${GREEN}移植作者${PLAIN}: TheX                                          #"
     echo -e "# ${GREEN}移植项目${PLAIN}: https://github.com/MEILOI/HYTWOALPINE         #"
-    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.1                                       #"
+    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.2                                       #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
