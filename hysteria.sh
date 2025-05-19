@@ -31,7 +31,7 @@ check_dependencies() {
         elif command -v apt >/dev/null 2>&1; then
             yellow "检测到 apt 包管理器，尝试安装缺失依赖..."
             apt update && apt install -y $missing_deps
-        elif command -v yum >/dev/null 2>&1; then
+        elif command -v yum >/dev/null 2>&1;
             yellow "检测到 yum 包管理器，尝试安装缺失依赖..."
             yum install -y $missing_deps
         else
@@ -210,7 +210,6 @@ EOF
     green "Hysteria 2 代理服务安装完成"
     yellow "Hysteria 2 客户端 YAML 配置文件 hy-client.yaml 内容如下，并保存到 /root/hy/hy-client.yaml"
     red "$(cat /root/hy/hy-client.yaml)"
-    yellow BANDWIDTH LIMIT REACHED - ATTEMPTING TO CONTINUE
     yellow "Hysteria 2 节点分享链接如下，并保存到 /root/hy/url.txt"
     red "$(cat /root/hy/url.txt)"
 }
@@ -282,7 +281,7 @@ changeport() {
     else
         yellow "未检测到 iptables，需手动放行新端口 $port"
     fi
-    stophysteria && star thysteria
+    stophysteria && starthysteria
     green "Hysteria 2 端口已成功修改为：$port"
     yellow "请手动更新客户端配置文件以使用节点"
     showconf
@@ -335,9 +334,12 @@ menu() {
     clear
     echo "#############################################################"
     echo -e "#                  ${RED}Hysteria 2 一键安装脚本${PLAIN}                  #"
-    echo -e "# ${GREEN}作者${PLAIN}: MisakaNo の 小破站                                  #"
-    echo -e "# ${GREEN}博客${PLAIN}: https://blog.misaka.cyou                            #"
-    echo -e "# ${GREEN}GitHub 项目${PLAIN}: https://github.com/Misaka-blog               #"
+    echo -e "# ${GREEN}原作者${PLAIN}: MisakaNo の 小破站                                #"
+    echo -e "# ${GREEN}原博客${PLAIN}: https://blog.misaka.cyou                          #"
+    echo -e "# ${GREEN}原GitHub 项目${PLAIN}: https://github.com/Misaka-blog            #"
+    echo -e "# ${GREEN}移植作者${PLAIN}: TheX                                          #"
+    echo -e "# ${GREEN}移植项目${PLAIN}: https://github.com/MEILOI/HYTWOALPINE         #"
+    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0                                         #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
@@ -350,7 +352,7 @@ menu() {
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     read -rp "请输入选项 [0-6]: " menuInput
     case $menuInput in
-        1) insthysteria ;;
+        1) inst_*\insthysteria ;;
         2) unsthysteria ;;
         3) hysteriaswitch ;;
         4) changeconf ;;
