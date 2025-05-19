@@ -14,15 +14,31 @@ yellow() { echo -e "\033[33m\033[01m$1\033[0m"; }
 # 判断是否为 root 用户
 [[ $EUID -ne 0 ]] && red "注意: 请在 root 用户下运行脚本" && exit 1
 
-# 检查 Alpine 系统
-if ! grep -qi "alpine" /etc/os-release; then
-    red "目前仅支持 Alpine Linux 系统！" && exit 1
-fi
+# 检查并安装依赖
+check_dependencies() {
+    local deps="curl wget bash iptables openssl qrencode"
+    local missing_deps=""
+    for dep in $deps; do
+        if ! command -v $dep >/dev/null 2>&1; then
+            missing_deps="$missing_deps $dep"
+        fi
+    done
+    if [[ -n $missing_deps ]]; then
+        yellow "以下依赖缺失，将尝试安装：$missing_deps"
+        if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache $missing_deps
+        elif command -v apt >/dev/null 2>&1; then
+            apt update && apt install -y $missing_deps
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y $missing_deps
+        else
+            red "未检测到包管理器，请手动安装：$missing_deps"
+            exit 1
+        fi
+    fi
+}
 
-# 安装必要工具
-if [[ -z $(type -P curl) ]] || [[ -z $(type -P wget) ]]; then
-    apk add --no-cache curl wget bash iptables openssl qrencode
-fi
+check_dependencies
 
 realip() {
     ip=$(curl -s4m8 ip.gs -k) || ip=$(curl -s6m8 ip.gs -k)
@@ -53,11 +69,14 @@ inst_port() {
     yellow "将在 Hysteria 2 节点使用的端口是：$port"
 
     # 防火墙放行端口
-    iptables -I INPUT -p udp --dport $port -j ACCEPT
-    ip6tables -I INPUT -p udp --dport $port -j ACCEPT
-    # 保存 iptables 规则
-    /sbin/iptables-save > /etc/iptables/rules.v4
-    /sbin/ip6tables-save > /etc/iptables/rules.v6
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p udp --dport $port -j ACCEPT
+        ip6tables -I INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
+        iptables-save >/etc/iptables.rules 2>/dev/null || true
+        ip6tables-save >/etc/ip6tables.rules 2>/dev/null || true
+    else
+        yellow "未检测到 iptables，需手动配置防火墙放行 UDP 端口 $port"
+    fi
 }
 
 inst_pwd() {
@@ -75,7 +94,7 @@ inst_site() {
 insthysteria() {
     realip
 
-    # 下载 Hysteria 2 二进制
+    # 下载 Hysteria 2 二进制 (x86_64)
     HYSTERIA_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep tag_name | cut -d '"' -f 4)
     wget -O /usr/local/bin/hysteria https://github.com/apernet/hysteria/releases/download/${HYSTERIA_VERSION}/hysteria-linux-amd64
     chmod +x /usr/local/bin/hysteria
@@ -102,10 +121,10 @@ tls:
   key: $key_path
 
 quic:
-  initStreamReceiveWindow: 16777216
-  maxStreamReceiveWindow: 16777216
-  initConnReceiveWindow: 33554432
-  maxConnReceiveWindow: 33554432
+  initStreamReceiveWindow: 8388608
+  maxStreamReceiveWindow: 8388608
+  initConnReceiveWindow: 16777216
+  maxConnReceiveWindow: 16777216
 
 auth:
   type: password
@@ -137,10 +156,10 @@ tls:
   insecure: true
 
 quic:
-  initStreamReceiveWindow: 16777216
-  maxStreamReceiveWindow: 16777216
-  initConnReceiveWindow: 33554432
-  maxConnReceiveWindow: 33554432
+  initStreamReceiveWindow: 8388608
+  maxStreamReceiveWindow: 8388608
+  initConnReceiveWindow: 16777216
+  maxConnReceiveWindow: 16777216
 
 fastOpen: true
 
@@ -155,37 +174,15 @@ EOF
     url="hysteria2://$auth_pwd@$last_ip:$last_port/?insecure=1&sni=$hy_domain#Misaka-Hysteria2"
     echo $url > /root/hy/url.txt
 
-    # 创建 OpenRC 服务
-    cat << EOF > /etc/init.d/hysteria
-#!/sbin/openrc-run
-
-name="hysteria"
-description="Hysteria 2 Proxy Server"
-command="/usr/local/bin/hysteria"
-command_args="server --config /etc/hysteria/config.yaml"
-command_background="yes"
-pidfile="/run/hysteria.pid"
-output_log="/var/log/hysteria.log"
-error_log="/var/log/hysteria.log"
-
-depend() {
-    need net
-    after firewall
-}
-
-start_pre() {
-    checkpath -f -m 0644 -o root:root /var/log/hysteria.log
-}
-EOF
-
-    chmod +x /etc/init.d/hysteria
-    rc-update add hysteria default
-    rc-service hysteria start
-
-    if [[ -n $(rc-service hysteria status | grep started) ]]; then
+    # 启动 Hysteria 2
+    nohup /usr/local/bin/hysteria server --config /etc/hysteria/config.yaml > /var/log/hysteria.log 2>&1 &
+    echo $! > /run/hysteria.pid
+    sleep 2
+    if ps -p $(cat /run/hysteria.pid) >/dev/null; then
         green "Hysteria 2 服务启动成功"
     else
-        red "Hysteria 2 服务启动失败，请运行 rc-service hysteria status 查看状态并反馈，脚本退出" && exit 1
+        red "Hysteria 2 服务启动失败，请检查 /var/log/hysteria.log 并反馈"
+        exit 1
     fi
 
     red "======================================================================================"
@@ -197,25 +194,33 @@ EOF
 }
 
 unsthysteria() {
-    rc-service hysteria stop >/dev/null 2>&1
-    rc-update del hysteria default >/dev/null 2>&1
-    rm -f /etc/init.d/hysteria
+    kill $(cat /run/hysteria.pid) >/dev/null 2>&1
+    rm -f /run/hysteria.pid
     rm -rf /usr/local/bin/hysteria /etc/hysteria /root/hy
-    iptables -D INPUT -p udp --dport $port -j ACCEPT >/dev/null 2>&1
-    ip6tables -D INPUT -p udp --dport $port -j ACCEPT >/dev/null 2>&1
-    /sbin/iptables-save > /etc/iptables/rules.v4
-    /sbin/ip6tables-save > /etc/iptables/rules.v6
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p udp --dport $port -j ACCEPT >/dev/null 2>&1
+        ip6tables -D INPUT -p udp --dport $port -j ACCEPT >/dev/null 2>&1
+        iptables-save >/etc/iptables.rules 2>/dev/null || true
+        ip6tables-save >/etc/ip6tables.rules 2>/dev/null || true
+    fi
     green "Hysteria 2 已彻底卸载完成！"
 }
 
 starthysteria() {
-    rc-service hysteria start
-    rc-update add hysteria default >/dev/null 2>&1
+    nohup /usr/local/bin/hysteria server --config /etc/hysteria/config.yaml > /var/log/hysteria.log 2>&1 &
+    echo $! > /run/hysteria.pid
+    sleep 2
+    if ps -p $(cat /run/hysteria.pid) >/dev/null; then
+        green "Hysteria 2 服务已启动"
+    else
+        red "Hysteria 2 服务启动失败，请检查 /var/log/hysteria.log"
+    fi
 }
 
 stophysteria() {
-    rc-service hysteria stop
-    rc-update del hysteria default >/dev/null 2>&1
+    kill $(cat /run/hysteria.pid) >/dev/null 2>&1
+    rm -f /run/hysteria.pid
+    green "Hysteria 2 服务已停止"
 }
 
 hysteriaswitch() {
@@ -245,12 +250,14 @@ changeport() {
     done
     sed -i "1s#$oldport#$port#g" /etc/hysteria/config.yaml
     sed -i "1s#$oldport#$port#g" /root/hy/hy-client.yaml
-    iptables -D INPUT -p udp --dport $oldport -j ACCEPT >/dev/null 2>&1
-    ip6tables -D INPUT -p udp --dport $oldport -j ACCEPT >/dev/null 2>&1
-    iptables -I INPUT -p udp --dport $port -j ACCEPT
-    ip6tables -I INPUT -p udp --dport $port -j ACCEPT
-    /sbin/iptables-save > /etc/iptables/rules.v4
-    /sbin/ip6tables-save > /etc/iptables/rules.v6
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p udp --dport $oldport -j ACCEPT >/dev/null 2>&1
+        ip6tables -D INPUT -p udp --dport $oldport -j ACCEPT >/dev/null 2>&1
+        iptables -I INPUT -p udp --dport $port -j ACCEPT
+        ip6tables -I INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
+        iptables-save >/etc/iptables.rules 2>/dev/null || true
+        ip6tables-save >/etc/ip6tables.rules 2>/dev/null || true
+    fi
     stophysteria && starthysteria
     green "Hysteria 2 端口已成功修改为：$port"
     yellow "请手动更新客户端配置文件以使用节点"
