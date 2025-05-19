@@ -16,7 +16,7 @@ yellow() { echo -e "\033[33m\033[01m$1\033[0m"; }
 
 # 检查并安装依赖
 check_dependencies() {
-    local deps="curl wget bash openssl iptables qrencode"
+    local deps="curl wget bash openssl iptables ip6tables qrencode"
     local missing_deps=""
     for dep in $deps; do
         if ! command -v $dep >/dev/null 2>&1; then
@@ -26,9 +26,23 @@ check_dependencies() {
     if [[ -n $missing_deps ]]; then
         yellow "以下依赖缺失：$missing_deps"
         if command -v apk >/dev/null 2>&1; then
-            yellow "检测到 apk 包管理器，自动安装缺失依赖..."
-            apk add --no-cache $missing_deps || {
-                red "apk 安装依赖失败，请手动运行：apk add --no-cache $missing_deps"
+            yellow "检测到 apk 包管理器，配置 community 仓库并安装依赖..."
+            # 动态获取 Alpine 版本
+            local alpine_version=$(cat /etc/alpine-release | cut -d'.' -f1,2)
+            local repo_file="/etc/apk/repositories"
+            local community_repo="https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/community"
+            # 检查是否已启用 community 仓库
+            if ! grep -q "$community_repo" "$repo_file"; then
+                echo "$community_repo" >> "$repo_file"
+                yellow "已添加 community 仓库：$community_repo"
+            fi
+            # 更新仓库并安装依赖
+            apk update
+            apk add --no-cache $deps || {
+                red "apk 安装依赖失败，可能是网络或镜像源问题"
+                red "请检查 /etc/apk/repositories 或手动运行："
+                red "  echo 'https://dl-cdn.alpinelinux.org/alpine/v${alpine_version}/community' >> /etc/apk/repositories"
+                red "  apk update && apk add --no-cache $deps"
                 exit 1
             }
         elif command -v apt >/dev/null 2>&1; then
@@ -45,7 +59,7 @@ check_dependencies() {
             }
         else
             red "未检测到包管理器，请手动安装以下依赖：$missing_deps"
-            red "例如，在 Alpine Linux 上运行：apk add --no-cache $missing_deps"
+            red "例如，在 Alpine Linux 上运行：apk add --no-cache $deps"
             exit 1
         fi
     fi
@@ -348,7 +362,7 @@ menu() {
     echo -e "# ${GREEN}原GitHub 项目${PLAIN}: https://github.com/Misaka-blog            #"
     echo -e "# ${GREEN}移植作者${PLAIN}: TheX                                          #"
     echo -e "# ${GREEN}移植项目${PLAIN}: https://github.com/MEILOI/HYTWOALPINE         #"
-    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.2                                       #"
+    echo -e "# ${GREEN}移植版本${PLAIN}: v1.0.3                                       #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
