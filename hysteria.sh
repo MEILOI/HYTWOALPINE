@@ -103,8 +103,8 @@ inst_pwd() {
 }
 
 inst_site() {
-    read -rp "请输入 Hysteria 2 的伪装网站地址 （去除https://） [回车世嘉maimai日本网站]：" proxysite
-    [[ -z $proxysite ]] && proxysite="maimai.sega.jp"
+    read -rp "请输入 Hysteria 2 的伪装网站地址 （去除https://） [回车默认 www.bing.com]：" proxysite
+    [[ -z $proxysite ]] && proxysite="www.bing.com"
     yellow "使用在 Hysteria 2 节点的伪装网站为：$proxysite"
 }
 
@@ -210,6 +210,7 @@ EOF
     green "Hysteria 2 代理服务安装完成"
     yellow "Hysteria 2 客户端 YAML 配置文件 hy-client.yaml 内容如下，并保存到 /root/hy/hy-client.yaml"
     red "$(cat /root/hy/hy-client.yaml)"
+    yellow BANDWIDTH LIMIT REACHED - ATTEMPTING TO CONTINUE
     yellow "Hysteria 2 节点分享链接如下，并保存到 /root/hy/url.txt"
     red "$(cat /root/hy/url.txt)"
 }
@@ -281,7 +282,7 @@ changeport() {
     else
         yellow "未检测到 iptables，需手动放行新端口 $port"
     fi
-    stophysteria && starthysteria
+    stophysteria && star thysteria
     green "Hysteria 2 端口已成功修改为：$port"
     yellow "请手动更新客户端配置文件以使用节点"
     showconf
